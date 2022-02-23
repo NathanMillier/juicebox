@@ -188,24 +188,101 @@ const createTags = async (tagList) => {
   const selectValues = tagList.map((_, index) => `$${index + 1}`).join(", ");
 
   try {
-    const response = await client.query(
+    await client.query(
       `
       INSERT INTO tags (name)
       VALUES (${insertValues})
       ON CONFLICT (name) DO NOTHING
-      SELECT * FROM tags
-      WHERE name
-      IN (${selectValues});
     `,
-      [insertValues, selectValues]
+      tagList
     );
-    console.log(response);
+
+    const response = await client.query(
+      `
+    SELECT * FROM tags
+    WHERE name
+    IN (${selectValues});
+    `,
+      tagList
+    );
+    return response.rows;
   } catch (error) {
     throw error;
   }
 };
 
-createTags(["oneTage", "tagstwo"]);
+const createPostTag = async (postId, tagId) => {
+  try {
+    await client.query(
+      `
+      INSERT INTO post_tags ("postId", "tagId")
+      VALUES ($1, $2)
+      ON CONFLICT ("postId", "tagId") DO NOTHING
+      RETURNING *;
+    `,
+      [postId, tagId]
+    );
+  } catch (error) {
+    throw error;
+  }
+};
+
+const addTagsToPost = async (postId, tagList) => {
+  try {
+    const createPostTagPromise = tagList.map((tag) =>
+      createPostTag(postId, tag.id)
+    );
+
+    await Promise.all(createPostTagPromise);
+    return await getPostById(postId);
+  } catch (error) {
+    throw error;
+  }
+};
+
+const getPostById = async (postId) => {
+  try {
+    const {
+      rows: [post],
+    } = await client.query(
+      `
+      SELECT * FROM posts
+      WHERE id = $1;
+    `,
+      [postId]
+    );
+
+    const { rows: tags } = await client.query(
+      `
+      SELECT tags.*
+      FROM tags
+      JOIN post_tags ON tags.id=post_tags."tagId"
+      WHERE post_tags."postId"=$1;
+    `,
+      [postId]
+    );
+
+    const {
+      rows: [author],
+    } = await client.query(
+      `
+      SELECT id, username, name, location
+      FROM users
+      WHERE id=$1;
+    `,
+      [post.authorId]
+    );
+
+    post.tags = tags;
+    post.author = author;
+
+    delete post.authorId;
+
+    return post;
+  } catch (error) {
+    throw error;
+  }
+};
 
 module.exports = {
   client,
@@ -217,4 +294,6 @@ module.exports = {
   getAllPosts,
   getPostsByUser,
   getUserById,
+  createTags,
+  addTagsToPost,
 };
